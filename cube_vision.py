@@ -145,6 +145,101 @@ def sample_cells_hsv(warped: np.ndarray) -> List[np.ndarray]:
     return samples
 
 
+def sample_polygon_hsv(image: np.ndarray, polygon: np.ndarray) -> Optional[np.ndarray]:
+    h, w = image.shape[:2]
+    poly = np.round(polygon).astype(np.int32)
+    poly[:, 0] = np.clip(poly[:, 0], 0, w - 1)
+    poly[:, 1] = np.clip(poly[:, 1], 0, h - 1)
+    if cv2.contourArea(poly.astype(np.float32)) < 8.0:
+        return None
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, poly, 255)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    region = hsv[mask > 0]
+    if len(region) == 0:
+        return None
+
+    v_vals = region[:, 2]
+    v_cut = np.percentile(v_vals, 40)
+    bright = region[v_vals >= v_cut]
+    return np.median(bright if len(bright) > 0 else region, axis=0)
+
+
+def edge_outward_normal(p0: np.ndarray, p1: np.ndarray, center: np.ndarray) -> np.ndarray:
+    edge = p1 - p0
+    length = float(np.linalg.norm(edge))
+    if length < 1e-6:
+        return np.array([0.0, 0.0], dtype=np.float32)
+
+    n = np.array([-edge[1], edge[0]], dtype=np.float32) / length
+    midpoint = (p0 + p1) * 0.5
+    toward_center = center - midpoint
+    if float(np.dot(n, toward_center)) > 0:
+        n = -n
+    return n
+
+
+def sample_side_strip_row(
+    image: np.ndarray,
+    p0: np.ndarray,
+    p1: np.ndarray,
+    center: np.ndarray,
+    seg_count: int = 3,
+    d_min: float = 10.0,
+    d_max: float = 20.0,
+) -> Tuple[List[str], List[np.ndarray]]:
+    n = edge_outward_normal(p0, p1, center)
+    colors: List[str] = []
+    polygons: List[np.ndarray] = []
+    edge_vec = p1 - p0
+
+    for i in range(seg_count):
+        t0 = i / seg_count
+        t1 = (i + 1) / seg_count
+        a0 = p0 + edge_vec * t0 + n * d_min
+        a1 = p0 + edge_vec * t1 + n * d_min
+        b1 = p0 + edge_vec * t1 + n * d_max
+        b0 = p0 + edge_vec * t0 + n * d_max
+        poly = np.array([a0, a1, b1, b0], dtype=np.float32)
+        polygons.append(poly)
+
+        sample = sample_polygon_hsv(image, poly)
+        if sample is None:
+            colors.append("unknown")
+        else:
+            colors.append(classify_hsv_color(sample))
+
+    return colors, polygons
+
+
+def detect_side_strip_rows(
+    image: np.ndarray, quad: np.ndarray
+) -> Tuple[Dict[str, List[str]], Dict[str, List[np.ndarray]]]:
+    q = order_points(quad.astype(np.float32))
+    tl, tr, br, bl = q
+    center = np.mean(q, axis=0)
+
+    front_row, front_polys = sample_side_strip_row(image, bl, br, center)
+    back_row, back_polys = sample_side_strip_row(image, tl, tr, center)
+    left_row, left_polys = sample_side_strip_row(image, tl, bl, center)
+    right_row, right_polys = sample_side_strip_row(image, tr, br, center)
+
+    rows = {
+        "front_row": front_row,
+        "back_row": back_row,
+        "left_row": left_row,
+        "right_row": right_row,
+    }
+    polys = {
+        "front_row": front_polys,
+        "back_row": back_polys,
+        "left_row": left_polys,
+        "right_row": right_polys,
+    }
+    return rows, polys
+
+
 def classify_hsv_color(hsv: np.ndarray) -> str:
     h, s, v = hsv
 
@@ -370,7 +465,9 @@ def parse_oll_algorithms(path: Path) -> Dict[int, str]:
     return by_case
 
 
-def detect_and_classify(image_path: Path, debug: bool) -> Tuple[List[str], List[bool], float, np.ndarray, np.ndarray]:
+def detect_and_classify(
+    image_path: Path, debug: bool
+) -> Tuple[List[str], List[bool], float, np.ndarray, np.ndarray, Dict[str, List[str]]]:
     image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError(f"Could not read image: {image_path}")
@@ -381,6 +478,7 @@ def detect_and_classify(image_path: Path, debug: bool) -> Tuple[List[str], List[
     quad = shrink_quad_toward_centroid(quad, shrink_ratio=0.04)
 
     warped = warp_face(image, quad, GRID_SIZE)
+    side_rows, side_polygons = detect_side_strip_rows(image, quad)
 
     hsv_samples = sample_cells_hsv(warped)
     initial_colors = [classify_hsv_color(sample) for sample in hsv_samples]
@@ -396,9 +494,18 @@ def detect_and_classify(image_path: Path, debug: bool) -> Tuple[List[str], List[
         confidence *= 0.75
 
     if debug:
-        draw_debug_outputs(image_path, image, quad, warped, colors, oriented)
+        draw_debug_outputs(
+            image_path,
+            image,
+            quad,
+            warped,
+            colors,
+            oriented,
+            side_rows,
+            side_polygons,
+        )
 
-    return colors, oriented, confidence, image, warped
+    return colors, oriented, confidence, image, warped, side_rows
 
 
 def draw_debug_outputs(
@@ -408,6 +515,8 @@ def draw_debug_outputs(
     warped: np.ndarray,
     colors: List[str],
     oriented: List[bool],
+    side_rows: Dict[str, List[str]],
+    side_polygons: Dict[str, List[np.ndarray]],
 ) -> None:
     stem = image_path.stem
 
@@ -426,6 +535,24 @@ def draw_debug_outputs(
             2,
             cv2.LINE_AA,
         )
+
+    for row_name, polys in side_polygons.items():
+        row_colors = side_rows.get(row_name, [])
+        for idx, poly in enumerate(polys):
+            poly_i = np.round(poly).astype(np.int32)
+            cv2.polylines(annotated, [poly_i], isClosed=True, color=(255, 0, 255), thickness=2)
+            center = np.mean(poly, axis=0).astype(int)
+            label = row_colors[idx][:1].upper() if idx < len(row_colors) else "?"
+            cv2.putText(
+                annotated,
+                label,
+                (int(center[0]) - 6, int(center[1]) + 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
 
     grid = warped.copy()
     for i in range(1, 3):
@@ -482,7 +609,7 @@ def main() -> int:
     pattern_lookup = build_oll_pattern_lookup()
 
     try:
-        colors, oriented, base_confidence, _, _ = detect_and_classify(image_path, args.debug)
+        colors, oriented, base_confidence, _, _, side_rows = detect_and_classify(image_path, args.debug)
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))
         return 2
@@ -501,6 +628,10 @@ def main() -> int:
         "algorithm": oll_algos.get(case_num, ""),
         "confidence": round(float(confidence), 2),
         "top_face": colors,
+        "front_row": side_rows["front_row"],
+        "back_row": side_rows["back_row"],
+        "left_row": side_rows["left_row"],
+        "right_row": side_rows["right_row"],
     }
     print(json.dumps(result))
     return 0
