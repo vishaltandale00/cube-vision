@@ -1,0 +1,89 @@
+[
+  {
+    "file": "file_16---ba2ed61b-a72e-46fa-950b-7e43b8f0352b.jpg",
+    "source": "/Users/vishal/.openclaw/media/inbound/file_16---ba2ed61b-a72e-46fa-950b-7e43b8f0352b.jpg",
+    "top_face": [
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "R",
+      "Y",
+      "R"
+    ],
+    "notes": "All edges oriented, 2 front corners not yellow (red). Cross case."
+  },
+  {
+    "file": "file_19---e47966cb-b0fc-48eb-8eaa-247e5bee723a.jpg",
+    "source": "/Users/vishal/.openclaw/media/inbound/file_19---e47966cb-b0fc-48eb-8eaa-247e5bee723a.jpg",
+    "top_face": [
+      "R",
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "O",
+      "Y",
+      "B",
+      "B"
+    ],
+    "notes": "L-shape OLL. Confirmed by user."
+  },
+  {
+    "file": "file_20---816ee17c-b380-4131-adfa-05b1cdd8c045.jpg",
+    "source": "/Users/vishal/.openclaw/media/inbound/file_20---816ee17c-b380-4131-adfa-05b1cdd8c045.jpg",
+    "top_face": [
+      "R",
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "O",
+      "Y",
+      "B",
+      "B"
+    ],
+    "notes": "Same state as file_19, same cube."
+  },
+  {
+    "file": "file_21---ef637959-2d69-4a12-a404-d7280e9bd6b7.jpg",
+    "source": "/Users/vishal/.openclaw/media/inbound/file_21---ef637959-2d69-4a12-a404-d7280e9bd6b7.jpg",
+    "top_face": [
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "Y",
+      "R",
+      "G",
+      "G",
+      "O"
+    ],
+    "notes": "L-shape, steeper angle. CV failed - detected side face. User confirmed: YYY/YYR/GGO"
+  },
+  {
+    "file": "file_22---eef2bc9e-9739-47a8-85e9-3becf1851085.jpg",
+    "source": "/Users/vishal/.openclaw/media/inbound/file_22---eef2bc9e-9739-47a8-85e9-3becf1851085.jpg",
+    "top_face": [
+      "O",
+      "R",
+      "R",
+      "B",
+      "Y",
+      "G",
+      "G",
+      "O",
+      "G"
+    ],
+    "side_stickers": {
+      "0": "Y on left",
+      "2": "Y on right",
+      "6": "Y on front",
+      "7": "Y on front",
+      "8": "Y on front"
+    },
+    "notes": "Dot case OLL 1. No edges, no corners oriented. Near top-down photo - CV nailed it."
+  }
+]
