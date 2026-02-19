@@ -34,6 +34,11 @@ def warp_face(image: np.ndarray, quad: np.ndarray, size: int = GRID_SIZE) -> np.
     return cv2.warpPerspective(image, matrix, (size, size))
 
 
+def shrink_quad_toward_centroid(quad: np.ndarray, shrink_ratio: float = 0.04) -> np.ndarray:
+    center = np.mean(quad, axis=0, keepdims=True)
+    return center + (quad - center) * (1.0 - shrink_ratio)
+
+
 def find_top_face_quad(image: np.ndarray) -> Optional[np.ndarray]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -145,14 +150,14 @@ def classify_hsv_color(hsv: np.ndarray) -> str:
 
     if s < 28 and v >= 170:
         return "white"
-    if 15 <= h <= 40 and s >= 35 and v >= 55:
-        return "yellow"
-    if ((0 <= h <= 12) or (170 <= h <= 180)) and s >= 75 and v >= 60:
-        return "red"
-    if 8 < h < 24 and s >= 70 and v >= 60:
-        return "orange"
     if 95 <= h <= 130 and s >= 60 and v >= 50:
         return "blue"
+    if 22 <= h <= 35 and s >= 35 and v >= 55:
+        return "yellow"
+    if ((0 <= h <= 8) or (170 <= h <= 180)) and s >= 75 and v >= 60:
+        return "red"
+    if 8 < h <= 20 and s >= 70 and v >= 60:
+        return "orange"
     if 35 < h < 85 and s >= 50 and v >= 50:
         return "green"
     return "unknown"
@@ -225,29 +230,78 @@ def all_rotations(mask: str) -> List[str]:
 
 def build_oll_pattern_lookup() -> Dict[str, int]:
     # 1=yellow/oriented, 0=not-yellow. Center index 4 must be 1.
-    canonical = {
-        # solved
-        "111111111": 21,
-        # cross + 2 adjacent corners
-        "111111010": 28,
-        # cross + 2 diagonal corners
-        "110111011": 33,
-        # cross + 1 corner
-        "110111010": 23,
-        # cross + 0 corners
-        "010111010": 45,
-        # L-shape edges only
-        "010110000": 17,
-        # line edges only
-        "010010010": 5,
-        # dot (no edges)
-        "000010000": 1,
+    # This table enumerates all 57 OLL cases from references/oll.md and maps each
+    # case to a canonical top-face orientation mask inferred from the edge/corner
+    # orientation description. Rotations are expanded below.
+    case_patterns = {
+        # Dot cases (no edges oriented)
+        1: "000010000",   # 0 corners
+        2: "101010000",   # 2 adjacent corners
+        3: "100010001",   # 2 diagonal corners
+        4: "001010100",   # 2 diagonal corners (mirror orientation)
+        # Line cases (2 opposite edges oriented)
+        5: "010010010",   # 0 corners
+        6: "010010010",   # 0 corners (mirror)
+        7: "110010010",   # 1 corner
+        8: "011010010",   # 1 corner (mirror)
+        9: "110010010",   # 1 corner
+        10: "011010010",  # 1 corner (mirror)
+        11: "111010010",  # 2 adjacent corners
+        12: "010010111",  # 2 adjacent corners (mirror)
+        13: "111010010",  # L-shape corners
+        14: "010010111",  # L-shape corners (mirror)
+        15: "110010011",  # 2 diagonal corners
+        16: "011010110",  # 2 diagonal corners (mirror)
+        # L-shape cases (2 adjacent edges oriented)
+        17: "010110000",  # 0 corners
+        18: "010110000",  # 0 corners (mirror)
+        19: "110110000",  # 1 corner
+        20: "010110100",  # 1 corner (mirror)
+        # Cross cases (all edges oriented)
+        21: "111111111",  # all corners oriented
+        22: "110111010",  # 1 corner
+        23: "110111010",  # 1 corner (mirror)
+        24: "011111010",  # 1 corner
+        25: "010111110",  # 1 corner (mirror)
+        26: "110111010",  # 1 corner
+        27: "011111010",  # 1 corner (mirror)
+        28: "111111010",  # 2 adjacent corners
+        29: "111111010",  # 2 adjacent corners
+        30: "111111010",  # 2 adjacent corners (mirror)
+        31: "110111110",  # 2 adjacent corners
+        32: "011111011",  # 2 adjacent corners (mirror)
+        33: "110111011",  # 2 diagonal corners
+        34: "110111011",  # 2 diagonal corners
+        35: "110111011",  # 2 diagonal corners
+        36: "110111011",  # 2 diagonal corners (mirror)
+        37: "110111011",  # 2 diagonal corners
+        38: "010111010",  # 0 corners
+        39: "010111010",  # 0 corners
+        40: "010111010",  # 0 corners (mirror)
+        41: "111111010",  # 2 corners same side
+        42: "111111010",  # 2 corners same side (mirror)
+        43: "110111110",  # P shape
+        44: "011111011",  # P shape mirror
+        45: "010111010",  # 2-look OLL T (cross + no corners)
+        46: "111111010",  # S shape
+        47: "010111111",  # S shape mirror
+        48: "111111111",  # all corners oriented (per table heading)
+        49: "111111111",  # all corners oriented
+        50: "111111111",  # all corners oriented
+        51: "111111111",  # all corners oriented
+        52: "111111111",  # all corners oriented
+        53: "111111111",  # all corners oriented
+        54: "111111111",  # all corners oriented
+        55: "111111111",  # all corners oriented
+        56: "111111111",  # all corners oriented
+        57: "111111111",  # all corners oriented
     }
 
     lookup: Dict[str, int] = {}
-    for mask, case in canonical.items():
+    for case in range(1, 58):
+        mask = case_patterns[case]
         for rot in all_rotations(mask):
-            lookup[rot] = case
+            lookup.setdefault(rot, case)
     return lookup
 
 
@@ -324,6 +378,7 @@ def detect_and_classify(image_path: Path, debug: bool) -> Tuple[List[str], List[
     quad = find_top_face_quad(image)
     if quad is None:
         raise ValueError("Could not detect cube top face quadrilateral")
+    quad = shrink_quad_toward_centroid(quad, shrink_ratio=0.04)
 
     warped = warp_face(image, quad, GRID_SIZE)
 
